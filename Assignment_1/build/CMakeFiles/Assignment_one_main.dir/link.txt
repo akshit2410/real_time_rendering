@@ -1,0 +1,1 @@
+/usr/bin/clang++ -g -arch arm64 -Wl,-search_paths_first -Wl,-headerpad_max_install_names CMakeFiles/Assignment_one_main.dir/source_code/main.cpp.o -o Assignment_one_main  -Wl,-rpath,/opt/homebrew/lib -framework OpenGL /opt/homebrew/lib/libglfw.3.4.dylib /opt/homebrew/lib/libassimp.6.0.2.dylib libglad.a /Library/Developer/CommandLineTools/SDKs/MacOSX15.sdk/usr/lib/libz.tbd

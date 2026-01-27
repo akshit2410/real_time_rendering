@@ -1,0 +1,4 @@
+/Users/akshitshrivastava/Documents/course_module_tcd/Real_time_rendering/Assignment_1/build/CMakeFiles/glad.dir
+/Users/akshitshrivastava/Documents/course_module_tcd/Real_time_rendering/Assignment_1/build/CMakeFiles/Assignment_one_main.dir
+/Users/akshitshrivastava/Documents/course_module_tcd/Real_time_rendering/Assignment_1/build/CMakeFiles/edit_cache.dir
+/Users/akshitshrivastava/Documents/course_module_tcd/Real_time_rendering/Assignment_1/build/CMakeFiles/rebuild_cache.dir

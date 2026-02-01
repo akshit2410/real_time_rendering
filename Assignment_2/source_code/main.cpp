@@ -258,6 +258,7 @@ int main()
     float dispersion = 0.02f;
     float exposure = 1.4f;
     float teapotScale = 1.0f;
+    float skyboxExposure = 1.5f;
     // ==================================
 
     // =====================================================
@@ -280,6 +281,8 @@ int main()
         ImGui::SliderFloat("Dispersion", &dispersion, 0.0f, 0.05f);
         ImGui::SliderFloat("Exposure", &exposure, 0.5f, 2.5f);
         ImGui::SliderFloat("Teapot Scale", &teapotScale, 0.1f, 3.0f);
+        ImGui::SliderFloat("Skybox Exposure", &skyboxExposure, 0.5f, 3.0f);
+
         ImGui::End();
         // --------------------------------
 
@@ -295,6 +298,7 @@ int main()
         glDepthFunc(GL_LEQUAL);
 
         glUseProgram(skyboxProgram);
+        glUniform1f(glGetUniformLocation(skyboxProgram, "skyboxExposure"), skyboxExposure);
 
         glm::mat4 viewNoTranslate = glm::mat4(glm::mat3(view));
         glUniformMatrix4fv(

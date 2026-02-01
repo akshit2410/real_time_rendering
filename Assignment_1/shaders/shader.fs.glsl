@@ -11,6 +11,12 @@ uniform vec3 baseColor;
 uniform int shadingModel;
 uniform float shininess;
 uniform float roughness;
+uniform float toonThreshold1; // e.g. 0.9
+uniform float toonThreshold2; // e.g. 0.6
+
+uniform float toonLevel1;     // e.g. 1.0
+uniform float toonLevel2;     // e.g. 0.4
+uniform float toonLevel3;     // e.g. 0.2
 
 const float PI = 3.14159265;
 
@@ -52,16 +58,21 @@ vec3 cookTorrance(vec3 N, vec3 L, vec3 V)
 
 
 // Toon shading
+
 vec3 toon(vec3 N, vec3 L)
 {
-    float i = dot(N, L);
+    float i = max(dot(N, L), 0.0);
 
-    if (i > 0.75)      i = 1.0;
-    else if (i > 0.4)  i = 0.6;
-    else               i = 0.2;
+    if (i > toonThreshold1)
+        i = toonLevel1;
+    else if (i > toonThreshold2)
+        i = toonLevel2;
+    else
+        i = toonLevel3;
 
     return baseColor * i;
 }
+
 
 void main()
 {

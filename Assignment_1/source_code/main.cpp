@@ -13,7 +13,10 @@
 #include <vector>
 #include <iostream>
 
-// ================= SHADER LOADING =================
+#include "imgui.h"
+#include "backends/imgui_impl_glfw.h"
+#include "backends/imgui_impl_opengl3.h"
+
 std::string loadShaderSource(const char* path)
 {
     std::ifstream file(path);
@@ -46,7 +49,6 @@ unsigned int createProgram(const std::string& vs, const std::string& fs)
     return p;
 }
 
-// ================= MAIN =================
 int main()
 {
     glfwInit();
@@ -56,13 +58,21 @@ int main()
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 
     GLFWwindow* window =
-        glfwCreateWindow(800, 600, "GLB Teapot", nullptr, nullptr);
+        glfwCreateWindow(800, 600, "GLB Teapot + ImGui", nullptr, nullptr);
     glfwMakeContextCurrent(window);
 
     gladLoadGLLoader((GLADloadproc)glfwGetProcAddress);
     glEnable(GL_DEPTH_TEST);
 
-    // ================= LOAD GLB =================
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO(); (void)io;
+
+    ImGui::StyleColorsDark();
+
+    ImGui_ImplGlfw_InitForOpenGL(window, true);
+    ImGui_ImplOpenGL3_Init("#version 330");
+
     Assimp::Importer importer;
     const aiScene* scene = importer.ReadFile(
         "resources/models/teapot.glb",
@@ -105,7 +115,6 @@ int main()
 
     int vertexCount = vertices.size() / 6;
 
-    // ================= VAO / VBO =================
     unsigned int VAO, VBO;
     glGenVertexArrays(1, &VAO);
     glGenBuffers(1, &VBO);
@@ -126,16 +135,44 @@ int main()
         6 * sizeof(float), (void*)(3 * sizeof(float)));
     glEnableVertexAttribArray(1);
 
-    // ================= SHADERS =================
     unsigned int program = createProgram(
         loadShaderSource("shaders/shader.vs.glsl"),
         loadShaderSource("shaders/shader.fs.glsl")
     );
 
-    // ================= RENDER LOOP =================
+    float roughness = 0.9f;
+    float shininess = 32.0f;
+    float toonThreshold1 = 0.9f;
+    float toonThreshold2 = 0.6f;
+
+    float toonLevel1 = 1.0f;
+    float toonLevel2 = 0.4f;
+    float toonLevel3 = 0.2f;
+
     while (!glfwWindowShouldClose(window))
     {
         float t = (float)glfwGetTime();
+
+        glfwPollEvents();
+
+        ImGui_ImplOpenGL3_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
+
+        ImGui::Begin("Material Controls");
+        ImGui::SliderFloat("Shininess", &shininess, 1.0f, 1000.0f);
+        ImGui::SliderFloat("Roughness", &roughness, 0.05f, 2.0f);
+        ImGui::Separator();
+        ImGui::Text("Toon Shading");
+
+        ImGui::SliderFloat("Threshold High", &toonThreshold1, 0.0f, 1.0f);
+        ImGui::SliderFloat("Threshold Mid", &toonThreshold2, 0.0f, toonThreshold1);
+
+        ImGui::SliderFloat("Light Level High", &toonLevel1, 0.0f, 1.0f);
+        ImGui::SliderFloat("Light Level Mid", &toonLevel2, 0.0f, 1.0f);
+        ImGui::SliderFloat("Light Level Low", &toonLevel3, 0.0f, 1.0f);
+        ImGui::Text("0 = Phong | 1 = cook | 2 = toon");
+        ImGui::End();
 
         glClearColor(0.8f, 0.8f, 0.1f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -162,9 +199,14 @@ int main()
         glUniform3f(glGetUniformLocation(program, "lightPos"), 2, 3, 2);
         glUniform3f(glGetUniformLocation(program, "viewPos"), 0, 0, 10);
         glUniform3f(glGetUniformLocation(program, "baseColor"), 0.8, 0.5, 0.3);
-        glUniform1f(glGetUniformLocation(program, "shininess"), 32);
-        glUniform1f(glGetUniformLocation(program, "roughness"), 0.9);
+        glUniform1f(glGetUniformLocation(program, "shininess"), shininess);
+        glUniform1f(glGetUniformLocation(program, "roughness"), roughness);
+        glUniform1f(glGetUniformLocation(program, "toonThreshold1"), toonThreshold1);
+        glUniform1f(glGetUniformLocation(program, "toonThreshold2"), toonThreshold2);
 
+        glUniform1f(glGetUniformLocation(program, "toonLevel1"), toonLevel1);
+        glUniform1f(glGetUniformLocation(program, "toonLevel2"), toonLevel2);
+        glUniform1f(glGetUniformLocation(program, "toonLevel3"), toonLevel3);
         glBindVertexArray(VAO);
 
         for (int i = 0; i < 3; i++)
@@ -182,9 +224,15 @@ int main()
             glDrawArrays(GL_TRIANGLES, 0, vertexCount);
         }
 
+        ImGui::Render();
+        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
         glfwSwapBuffers(window);
-        glfwPollEvents();
     }
+
+    ImGui_ImplOpenGL3_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
+    ImGui::DestroyContext();
 
     glfwTerminate();
     return 0;

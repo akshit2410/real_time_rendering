@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.10)
-project(AssignmentOne)
+project(AssignmentSecond)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -71,12 +71,12 @@ include_directories(
 # -----------------------------
 file(GLOB SOURCES "source_code/*.cpp")
 
-add_executable(Assignment_one_main ${SOURCES})
+add_executable(Assignment_second_main ${SOURCES})
 
 # -----------------------------
 # Link libraries
 # -----------------------------
-target_link_libraries(Assignment_one_main PRIVATE
+target_link_libraries(Assignment_second_main PRIVATE
     OpenGL::GL
     glfw
     assimp::assimp
@@ -87,10 +87,10 @@ target_link_libraries(Assignment_one_main PRIVATE
 # -----------------------------
 # Copy resources
 # -----------------------------
-add_custom_command(TARGET Assignment_one_main POST_BUILD
+add_custom_command(TARGET Assignment_second_main POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory
-        "$<TARGET_FILE_DIR:Assignment_one_main>/resources"
+        "$<TARGET_FILE_DIR:Assignment_second_main>/resources"
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         "${CMAKE_CURRENT_SOURCE_DIR}/resources"
-        "$<TARGET_FILE_DIR:Assignment_one_main>/resources"
+        "$<TARGET_FILE_DIR:Assignment_second_main>/resources"
 )

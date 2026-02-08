@@ -14,33 +14,35 @@ uniform float exposure;
 
 void main()
 {
-    float clampedDispersion = max(dispersion, 0.0001) * 5.0;
-    float clampedExposure = max(exposure, 0.0001);
     vec3 N = normalize(Normal);
     vec3 V = normalize(cameraPos - WorldPos);
 
-    // ---------- Reflection ----------
+    // ---------------- Reflection ----------------
     vec3 R = reflect(-V, N);
     vec3 reflected = texture(skybox, R).rgb;
 
-    // ---------- Chromatic Dispersion ----------
-    vec3 refrR = refract(-V, N, 1.0 / (ior - clampedDispersion));
+    // ---------------- Refraction + Dispersion ----------------
+    float disp = clamp(dispersion, 0.0, 0.01);
+
+    vec3 refrR = refract(-V, N, 1.0 / (ior - disp));
     vec3 refrG = refract(-V, N, 1.0 / ior);
-    vec3 refrB = refract(-V, N, 1.0 / (ior + clampedDispersion));
+    vec3 refrB = refract(-V, N, 1.0 / (ior + disp));
 
     vec3 refracted;
     refracted.r = texture(skybox, refrR).r;
     refracted.g = texture(skybox, refrG).g;
     refracted.b = texture(skybox, refrB).b;
 
-    // ---------- Fresnel ----------
-    float cosTheta = clamp(dot(V, N), 0.0, 1.0);
-    float F = pow(1.0 - cosTheta, fresnelPower);
+    // ---------------- Fresnel (Schlick-like) ----------------
+    float cosTheta = clamp(dot(N, V), 0.0, 1.0);
+    float fresnel = pow(1.0 - cosTheta, fresnelPower);
 
-    vec3 color = mix(refracted, reflected, F);
+    vec3 glassTint = vec3(0.96, 0.98, 1.0);
+    float thickness = pow(1.0 - cosTheta, 1.5);
+    vec3 transmission = refracted * glassTint * (1.0 - thickness * 0.4);
 
-    // ---------- Tone Mapping ----------
-    color = pow(color * clampedExposure, vec3(1.0 / 2.2));
+    vec3 color = mix(transmission, reflected, fresnel);
+    color *= exposure;
 
     FragColor = vec4(color, 1.0);
 }

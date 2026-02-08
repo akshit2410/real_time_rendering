@@ -225,12 +225,12 @@ int main()
 
     // ---------- Cubemap ----------
     unsigned cubemap = loadCubemap({
-        "resources/cubemap/right.png",
-        "resources/cubemap/left.png",
-        "resources/cubemap/top.png",
-        "resources/cubemap/bottom.png",
-        "resources/cubemap/front.png",
-        "resources/cubemap/back.png"
+        "resources/cubemap/right.jpg",
+        "resources/cubemap/left.jpg",
+        "resources/cubemap/top.jpg",
+        "resources/cubemap/bottom.jpg",
+        "resources/cubemap/front.jpg",
+        "resources/cubemap/back.jpg"
     });
 
     // ---------- Shaders ----------
@@ -255,10 +255,10 @@ int main()
     // ===== ImGui-controlled values =====
     float ior = 1.52f;
     float fresnelPower = 5.0f;
-    float dispersion = 0.02f;
+    float dispersion = 0.2f;
     float exposure = 1.4f;
-    float teapotScale = 1.0f;
-    float skyboxExposure = 1.5f;
+    float teapotScale = 1.25f;
+    float skyboxExposure = 0.68f;
     // ==================================
 
     // =====================================================
@@ -277,11 +277,11 @@ int main()
 
         ImGui::Begin("Glass Controls");
         ImGui::SliderFloat("IOR", &ior, 1.0f, 2.5f);
-        ImGui::SliderFloat("Fresnel Power", &fresnelPower, 1.0f, 10.0f);
-        ImGui::SliderFloat("Dispersion", &dispersion, 0.0f, 0.05f);
+        ImGui::SliderFloat("Fresnel Power", &fresnelPower, 0.0f, 10.0f);
+        ImGui::SliderFloat("Dispersion", &dispersion, 0.0f, 5.0f);
         ImGui::SliderFloat("Exposure", &exposure, 0.5f, 2.5f);
         ImGui::SliderFloat("Teapot Scale", &teapotScale, 0.1f, 3.0f);
-        ImGui::SliderFloat("Skybox Exposure", &skyboxExposure, 0.5f, 3.0f);
+        ImGui::SliderFloat("Skybox Exposure", &skyboxExposure, 0.0f, 1.0f);
 
         ImGui::End();
         // --------------------------------
@@ -290,8 +290,8 @@ int main()
 
         glm::mat4 view = glm::lookAt(
             cameraPos, glm::vec3(0), glm::vec3(0, 1, 0));
-        glm::mat4 proj = glm::perspective(
-            glm::radians(45.f), 800.f / 600.f, 0.1f, 100.f);
+        glm::mat4 proj = glm::perspective(glm::radians(73.f), 800.f / 600.f, 0.2f, 100.f);
+
 
         // ---------- SKYBOX ----------
         glDepthMask(GL_FALSE);
@@ -338,7 +338,6 @@ int main()
             glGetUniformLocation(glassProgram, "cameraPos"),
             1, glm::value_ptr(cameraPos));
 
-        // 🔴 ONLY CHANGE HERE (from constants → ImGui)
         glUniform1f(glGetUniformLocation(glassProgram, "ior"), ior);
         glUniform1f(glGetUniformLocation(glassProgram, "fresnelPower"), fresnelPower);
         glUniform1f(glGetUniformLocation(glassProgram, "dispersion"), dispersion);

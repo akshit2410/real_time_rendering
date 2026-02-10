@@ -16,12 +16,14 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 
-// -------- ImGui --------
+// ---------- ImGui ----------
 #include "imgui.h"
 #include "backends/imgui_impl_glfw.h"
 #include "backends/imgui_impl_opengl3.h"
 
-// ================= Shader helpers =================
+// =======================================================
+// Shader helpers
+// =======================================================
 std::string loadFile(const char* path)
 {
     std::ifstream f(path);
@@ -54,7 +56,9 @@ GLuint makeProgram(const char* vs, const char* fs)
     return p;
 }
 
-// ================= Texture loader =================
+// =======================================================
+// Texture loader
+// =======================================================
 GLuint loadTexture(const char* path)
 {
     int w, h, c;
@@ -86,31 +90,35 @@ GLuint loadTexture(const char* path)
     return tex;
 }
 
-// ================= MAIN =================
+// =======================================================
+// MAIN
+// =======================================================
 int main()
 {
-    // -------- GLFW --------
+    // ---------- GLFW ----------
     glfwInit();
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
     GLFWwindow* window =
-        glfwCreateWindow(1000, 800, "Normal Mapping – Assignment Demo", nullptr, nullptr);
+        glfwCreateWindow(1200, 800, "Normal Mapping – Side-by-Side Comparison", nullptr, nullptr);
     glfwMakeContextCurrent(window);
     gladLoadGLLoader((GLADloadproc)glfwGetProcAddress);
 
     glEnable(GL_DEPTH_TEST);
-    glDisable(GL_CULL_FACE); // easier for demo
+    glDisable(GL_CULL_FACE);
 
-    // -------- ImGui --------
+    // ---------- ImGui ----------
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGui::StyleColorsDark();
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init("#version 330");
 
-    // ================= Load GLTF =================
+    // =======================================================
+    // Load GLTF (ALL meshes)
+    // =======================================================
     Assimp::Importer importer;
     const aiScene* scene = importer.ReadFile(
         "resources/models/model.gltf",
@@ -125,7 +133,6 @@ int main()
         return -1;
     }
 
-    // ======== IMPORTANT FIX: LOAD *ALL* MESHES ========
     std::vector<float> verts;
 
     for (unsigned m = 0; m < scene->mNumMeshes; m++)
@@ -159,19 +166,23 @@ int main()
             }
         }
     }
+
+    // ---------- Compute mesh center (for local rotation) ----------
     glm::vec3 meshCenter(0.0f);
-    int vertexCount = verts.size() / 11;
-
-    for (int i = 0; i < vertexCount; i++)
+    int vCount = verts.size() / 11;
+    for (int i = 0; i < vCount; i++)
     {
-        meshCenter.x += verts[i * 11 + 0];
-        meshCenter.y += verts[i * 11 + 1];
-        meshCenter.z += verts[i * 11 + 2];
+        meshCenter += glm::vec3(
+            verts[i * 11 + 0],
+            verts[i * 11 + 1],
+            verts[i * 11 + 2]
+        );
     }
-    meshCenter /= (float)vertexCount;
+    meshCenter /= (float)vCount;
 
-
-    // ================= VAO / VBO =================
+    // =======================================================
+    // VAO / VBO
+    // =======================================================
     GLuint VAO, VBO;
     glGenVertexArrays(1, &VAO);
     glGenBuffers(1, &VBO);
@@ -193,7 +204,9 @@ int main()
     glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, stride, (void*)(8 * sizeof(float)));
     glEnableVertexAttribArray(3);
 
-    // ================= Shaders & Textures =================
+    // =======================================================
+    // Shaders & textures
+    // =======================================================
     GLuint program = makeProgram(
         "shaders/shader.vs.glsl",
         "shaders/shader.fs.glsl"
@@ -206,59 +219,55 @@ int main()
     glUniform1i(glGetUniformLocation(program, "diffuseMap"), 0);
     glUniform1i(glGetUniformLocation(program, "normalMap"), 1);
 
-    // ================= Scene Controls =================
-    glm::vec3 cameraPos(0.0f, 0.0f, 4.0f);
-    glm::vec3 lightPos(0.0f, 2.0f, 2.0f);
+    // =======================================================
+    // Scene controls
+    // =======================================================
+    glm::vec3 cameraPos(0.0f, 0.0f, 6.0f);
+    glm::vec3 lightPos(0.0f, 2.0f, 3.0f);
 
-    bool  useNormalMap   = true;
+    float rotationSpeed = 0.6f;
     float normalStrength = 1.5f;
-    float ambient        = 0.35f;
-    float rotationSpeed  = 0.6f;
+    float ambient = 0.35f;
+    float separation = 1.5f;
 
-    // ================= Render Loop =================
+    // =======================================================
+    // Render loop
+    // =======================================================
     while (!glfwWindowShouldClose(window))
     {
         glfwPollEvents();
 
-        // ----- ImGui -----
+        // ---------- ImGui ----------
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
 
         ImGui::Begin("Normal Mapping Controls");
-        ImGui::Checkbox("Enable Normal Map", &useNormalMap);
+        ImGui::Text("LEFT  : Normal Map OFF");
+        ImGui::Text("RIGHT : Normal Map ON");
+        ImGui::Separator();
         ImGui::SliderFloat("Normal Strength", &normalStrength, 0.0f, 3.0f);
         ImGui::SliderFloat("Ambient", &ambient, 0.05f, 0.6f);
         ImGui::SliderFloat("Rotation Speed", &rotationSpeed, 0.0f, 2.0f);
         ImGui::SliderFloat3("Light Position", &lightPos[0], -5.0f, 5.0f);
         ImGui::End();
 
-        // ----- Render -----
+        // ---------- Render ----------
         glClearColor(0.12f, 0.12f, 0.15f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         float t = (float)glfwGetTime();
 
-        
-        glm::mat4 model = glm::mat4(1.0f);
-        model = glm::translate(model, meshCenter);
-        model = glm::rotate(model, t * rotationSpeed, glm::vec3(0, 1, 0));
-        model = glm::translate(model, -meshCenter);
-        glm::mat4 view =
-            glm::lookAt(cameraPos, glm::vec3(0), glm::vec3(0, 1, 0));
-        glm::mat4 proj =
-            glm::perspective(glm::radians(45.f), 1000.f / 800.f, 0.1f, 100.f);
+        glm::mat4 view = glm::lookAt(cameraPos, glm::vec3(0), glm::vec3(0, 1, 0));
+        glm::mat4 proj = glm::perspective(glm::radians(45.f), 1200.f / 800.f, 0.1f, 100.f);
 
         glUseProgram(program);
-        glUniformMatrix4fv(glGetUniformLocation(program, "model"), 1, 0, &model[0][0]);
         glUniformMatrix4fv(glGetUniformLocation(program, "view"), 1, 0, &view[0][0]);
         glUniformMatrix4fv(glGetUniformLocation(program, "projection"), 1, 0, &proj[0][0]);
-
         glUniform3fv(glGetUniformLocation(program, "lightPos"), 1, &lightPos[0]);
         glUniform3fv(glGetUniformLocation(program, "viewPos"), 1, &cameraPos[0]);
         glUniform1f(glGetUniformLocation(program, "ambientStrength"), ambient);
         glUniform1f(glGetUniformLocation(program, "normalStrength"), normalStrength);
-        glUniform1i(glGetUniformLocation(program, "useNormalMap"), useNormalMap);
 
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, diffTex);
@@ -266,16 +275,37 @@ int main()
         glBindTexture(GL_TEXTURE_2D, normTex);
 
         glBindVertexArray(VAO);
+
+        // ---------- LEFT: NO normal map ----------
+        glm::mat4 modelLeft(1.0f);
+        modelLeft = glm::translate(modelLeft, glm::vec3(-separation, 0, 0));
+        modelLeft = glm::translate(modelLeft, meshCenter);
+        modelLeft = glm::rotate(modelLeft, t * rotationSpeed, glm::vec3(0, 1, 0));
+        modelLeft = glm::translate(modelLeft, -meshCenter);
+
+        glUniformMatrix4fv(glGetUniformLocation(program, "model"), 1, 0, &modelLeft[0][0]);
+        glUniform1i(glGetUniformLocation(program, "useNormalMap"), false);
         glDrawArrays(GL_TRIANGLES, 0, verts.size() / 11);
 
-        // ----- ImGui draw -----
+        // ---------- RIGHT: WITH normal map ----------
+        glm::mat4 modelRight(1.0f);
+        modelRight = glm::translate(modelRight, glm::vec3(+separation, 0, 0));
+        modelRight = glm::translate(modelRight, meshCenter);
+        modelRight = glm::rotate(modelRight, t * rotationSpeed, glm::vec3(0, 1, 0));
+        modelRight = glm::translate(modelRight, -meshCenter);
+
+        glUniformMatrix4fv(glGetUniformLocation(program, "model"), 1, 0, &modelRight[0][0]);
+        glUniform1i(glGetUniformLocation(program, "useNormalMap"), true);
+        glDrawArrays(GL_TRIANGLES, 0, verts.size() / 11);
+
+        // ---------- ImGui draw ----------
         ImGui::Render();
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
         glfwSwapBuffers(window);
     }
 
-    // ================= Cleanup =================
+    // ---------- Cleanup ----------
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();

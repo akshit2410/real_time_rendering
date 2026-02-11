@@ -21,9 +21,6 @@
 #include "backends/imgui_impl_glfw.h"
 #include "backends/imgui_impl_opengl3.h"
 
-// =======================================================
-// Shader helpers
-// =======================================================
 std::string loadFile(const char* path)
 {
     std::ifstream f(path);
@@ -56,9 +53,6 @@ GLuint makeProgram(const char* vs, const char* fs)
     return p;
 }
 
-// =======================================================
-// Texture loader
-// =======================================================
 GLuint loadTexture(const char* path)
 {
     int w, h, c;
@@ -90,12 +84,9 @@ GLuint loadTexture(const char* path)
     return tex;
 }
 
-// =======================================================
-// MAIN
-// =======================================================
+
 int main()
 {
-    // ---------- GLFW ----------
     glfwInit();
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
@@ -109,16 +100,11 @@ int main()
     glEnable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
 
-    // ---------- ImGui ----------
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGui::StyleColorsDark();
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init("#version 330");
-
-    // =======================================================
-    // Load GLTF (ALL meshes)
-    // =======================================================
     Assimp::Importer importer;
     const aiScene* scene = importer.ReadFile(
         "resources/models/model.gltf",
@@ -167,7 +153,6 @@ int main()
         }
     }
 
-    // ---------- Compute mesh center (for local rotation) ----------
     glm::vec3 meshCenter(0.0f);
     int vCount = verts.size() / 11;
     for (int i = 0; i < vCount; i++)
@@ -180,9 +165,6 @@ int main()
     }
     meshCenter /= (float)vCount;
 
-    // =======================================================
-    // VAO / VBO
-    // =======================================================
     GLuint VAO, VBO;
     glGenVertexArrays(1, &VAO);
     glGenBuffers(1, &VBO);
@@ -204,9 +186,6 @@ int main()
     glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, stride, (void*)(8 * sizeof(float)));
     glEnableVertexAttribArray(3);
 
-    // =======================================================
-    // Shaders & textures
-    // =======================================================
     GLuint program = makeProgram(
         "shaders/shader.vs.glsl",
         "shaders/shader.fs.glsl"
@@ -219,9 +198,6 @@ int main()
     glUniform1i(glGetUniformLocation(program, "diffuseMap"), 0);
     glUniform1i(glGetUniformLocation(program, "normalMap"), 1);
 
-    // =======================================================
-    // Scene controls
-    // =======================================================
     glm::vec3 cameraPos(0.0f, 0.0f, 6.0f);
     glm::vec3 lightPos(0.0f, 2.0f, 3.0f);
 
@@ -230,9 +206,6 @@ int main()
     float ambient = 0.35f;
     float separation = 1.5f;
 
-    // =======================================================
-    // Render loop
-    // =======================================================
     while (!glfwWindowShouldClose(window))
     {
         glfwPollEvents();
@@ -252,7 +225,6 @@ int main()
         ImGui::SliderFloat3("Light Position", &lightPos[0], -5.0f, 5.0f);
         ImGui::End();
 
-        // ---------- Render ----------
         glClearColor(0.12f, 0.12f, 0.15f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -298,14 +270,12 @@ int main()
         glUniform1i(glGetUniformLocation(program, "useNormalMap"), true);
         glDrawArrays(GL_TRIANGLES, 0, verts.size() / 11);
 
-        // ---------- ImGui draw ----------
         ImGui::Render();
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
         glfwSwapBuffers(window);
     }
 
-    // ---------- Cleanup ----------
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();

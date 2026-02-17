@@ -1,5 +1,6 @@
 // =======================================
 // MIPMAPPING DEMO – Procedural Sphere
+// Full Version with Keyboard + UV Control
 // =======================================
 
 #include <glad/glad.h>
@@ -22,6 +23,7 @@
 #include <sstream>
 #include <cmath>
 
+// ================= WINDOW =================
 int SCR_WIDTH = 1280;
 int SCR_HEIGHT = 720;
 
@@ -30,7 +32,64 @@ glm::vec3 cameraPos(0, 3, 12);
 glm::vec3 cameraFront(0, 0, -1);
 glm::vec3 cameraUp(0, 1, 0);
 
-// ================= SHADER LOADER (UNCHANGED) =================
+float yaw = -90.0f;
+float pitch = 0.0f;
+
+float cameraSpeed = 8.0f;
+float deltaTime = 0.0f;
+float lastFrame = 0.0f;
+
+// ================= SPHERE UV CONTROL =================
+float sphereUVScale = 1.0f;
+
+// ================= INPUT =================
+void processInput(GLFWwindow* window)
+{
+    float velocity = cameraSpeed * deltaTime;
+
+    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
+        cameraPos += cameraFront * velocity;
+
+    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
+        cameraPos -= cameraFront * velocity;
+
+    glm::vec3 right = glm::normalize(glm::cross(cameraFront, cameraUp));
+
+    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
+        cameraPos -= right * velocity;
+
+    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
+        cameraPos += right * velocity;
+
+    if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS)
+        cameraPos.y += velocity;
+
+    if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS)
+        cameraPos.y -= velocity;
+
+    if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS)
+        yaw -= 100.0f * deltaTime;
+
+    if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS)
+        yaw += 100.0f * deltaTime;
+
+    if (glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS)
+        pitch += 100.0f * deltaTime;
+
+    if (glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS)
+        pitch -= 100.0f * deltaTime;
+
+    if (pitch > 89.0f) pitch = 89.0f;
+    if (pitch < -89.0f) pitch = -89.0f;
+
+    glm::vec3 front;
+    front.x = cos(glm::radians(yaw)) * cos(glm::radians(pitch));
+    front.y = sin(glm::radians(pitch));
+    front.z = sin(glm::radians(yaw)) * cos(glm::radians(pitch));
+    cameraFront = glm::normalize(front);
+}
+
+// ================= SHADER LOADER =================
 std::string loadShader(const char* path)
 {
     std::ifstream file(path);
@@ -127,7 +186,7 @@ unsigned int loadTexture(const char* path)
     return tex;
 }
 
-// ================= UV SPHERE GENERATOR =================
+// ================= SPHERE GENERATOR =================
 void createSphere(std::vector<float>& vertices, int sectors = 64, int stacks = 64)
 {
     float radius = 1.0f;
@@ -202,13 +261,11 @@ int main()
 
     glEnable(GL_DEPTH_TEST);
 
-    // IMGUI
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGui_ImplGlfw_InitForOpenGL(window,true);
     ImGui_ImplOpenGL3_Init("#version 330");
 
-    // Create sphere
     std::vector<float> sphereVerts;
     createSphere(sphereVerts);
 
@@ -233,7 +290,6 @@ int main()
 
     int sphereCount = sphereVerts.size()/8;
 
-    // Floor
     unsigned int floorVAO,floorVBO;
     glGenVertexArrays(1,&floorVAO);
     glGenBuffers(1,&floorVBO);
@@ -259,10 +315,14 @@ int main()
     glUseProgram(shader);
     glUniform1i(glGetUniformLocation(shader,"texture1"),0);
 
-    // LOOP
     while(!glfwWindowShouldClose(window))
     {
+        float currentFrame = glfwGetTime();
+        deltaTime = currentFrame - lastFrame;
+        lastFrame = currentFrame;
+
         glfwPollEvents();
+        processInput(window);
         applyFilter(texture);
 
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -270,8 +330,8 @@ int main()
         float t = glfwGetTime();
 
         glm::mat4 view = glm::lookAt(cameraPos,
-                                     glm::vec3(0),
-                                     glm::vec3(0,1,0));
+                                     cameraPos + cameraFront,
+                                     cameraUp);
 
         glm::mat4 proj = glm::perspective(glm::radians(45.f),
                                           (float)SCR_WIDTH/SCR_HEIGHT,
@@ -287,31 +347,41 @@ int main()
         glBindTexture(GL_TEXTURE_2D,texture);
 
         // Floor
+        float rotationSpeed = 0.2f; // slower
         glm::mat4 model(1.0f);
+        model = glm::translate(model, glm::vec3(0,2,0));
+        model = glm::rotate(model, t * rotationSpeed, glm::vec3(0,1,0));
         glUniformMatrix4fv(glGetUniformLocation(shader,"model"),1,0,&model[0][0]);
+        glUniform1f(glGetUniformLocation(shader,"uvScale"), 1.0f);
         glBindVertexArray(floorVAO);
         glDrawArrays(GL_TRIANGLES,0,6);
 
         // Sphere
-        glm::mat4 sphere(1.0f);
+        glm::mat4 sphere(3.0f);
         sphere = glm::translate(sphere, glm::vec3(0,2,0));
         sphere = glm::rotate(sphere, t, glm::vec3(0,1,0));
         sphere = glm::scale(sphere, glm::vec3(1.5f));
 
         glUniformMatrix4fv(glGetUniformLocation(shader,"model"),1,0,&sphere[0][0]);
+        glUniform1f(glGetUniformLocation(shader,"uvScale"), sphereUVScale);
         glBindVertexArray(sphereVAO);
         glDrawArrays(GL_TRIANGLES,0,sphereCount);
 
-        // GUI
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
 
         ImGui::Begin("Mipmapping Controls");
+        ImGui::Text("WASD: Move");
+        ImGui::Text("Arrow Keys: Rotate");
+        ImGui::Text("Q/E: Up/Down");
+        ImGui::Separator();
         ImGui::RadioButton("No Mipmap", &currentMode, NO_MIPMAP);
         ImGui::RadioButton("Nearest", &currentMode, NEAREST);
         ImGui::RadioButton("Bilinear", &currentMode, BILINEAR);
         ImGui::RadioButton("Trilinear", &currentMode, TRILINEAR);
+        ImGui::Separator();
+        ImGui::SliderFloat("Sphere Texture Scale", &sphereUVScale, 1.0f, 200.0f);
         ImGui::End();
 
         ImGui::Render();

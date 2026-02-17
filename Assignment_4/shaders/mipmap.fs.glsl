@@ -9,10 +9,11 @@ in vec3 FragPos;
 uniform sampler2D texture1;
 uniform vec3 lightPos;
 uniform vec3 viewPos;
-
+uniform float uvScale;
 void main()
 {
-    vec3 baseColor = texture(texture1, TexCoord).rgb;
+
+    vec3 baseColor = texture(texture1, TexCoord * uvScale).rgb;
 
     vec3 norm = normalize(Normal);
     vec3 lightDir = normalize(lightPos - FragPos);

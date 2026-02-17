@@ -11,6 +11,7 @@ uniform vec3 lightPos;
 uniform vec3 viewPos;
 uniform int useTexture;
 
+
 void main()
 {
     vec3 baseColor;
@@ -18,7 +19,7 @@ void main()
     if(useTexture == 1)
         baseColor = texture(texture1, TexCoord).rgb;
     else
-        baseColor = vec3(0.8,0.8,0.85);
+        baseColor = vec3(0.8,0.8,0.8);
 
     vec3 norm = normalize(Normal);
     vec3 lightDir = normalize(lightPos - FragPos);

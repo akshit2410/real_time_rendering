@@ -1,8 +1,3 @@
-// =======================================
-// MIPMAPPING DEMO – Procedural Sphere
-// Full Version with Keyboard + UV Control
-// =======================================
-
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 
@@ -23,11 +18,9 @@
 #include <sstream>
 #include <cmath>
 
-// ================= WINDOW =================
 int SCR_WIDTH = 1280;
 int SCR_HEIGHT = 720;
 
-// ================= CAMERA =================
 glm::vec3 cameraPos(0, 3, 12);
 glm::vec3 cameraFront(0, 0, -1);
 glm::vec3 cameraUp(0, 1, 0);
@@ -38,11 +31,8 @@ float pitch = 0.0f;
 float cameraSpeed = 8.0f;
 float deltaTime = 0.0f;
 float lastFrame = 0.0f;
+float sphereUVScale = 95.0f;
 
-// ================= SPHERE UV CONTROL =================
-float sphereUVScale = 1.0f;
-
-// ================= INPUT =================
 void processInput(GLFWwindow* window)
 {
     float velocity = cameraSpeed * deltaTime;
@@ -89,7 +79,7 @@ void processInput(GLFWwindow* window)
     cameraFront = glm::normalize(front);
 }
 
-// ================= SHADER LOADER =================
+
 std::string loadShader(const char* path)
 {
     std::ifstream file(path);
@@ -156,7 +146,7 @@ void applyFilter(unsigned int tex)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 }
 
-// ================= LOAD TEXTURE =================
+
 unsigned int loadTexture(const char* path)
 {
     unsigned int tex;
@@ -186,7 +176,7 @@ unsigned int loadTexture(const char* path)
     return tex;
 }
 
-// ================= SPHERE GENERATOR =================
+
 void createSphere(std::vector<float>& vertices, int sectors = 64, int stacks = 64)
 {
     float radius = 1.0f;
@@ -244,7 +234,6 @@ void createSphere(std::vector<float>& vertices, int sectors = 64, int stacks = 6
     vertices = finalVerts;
 }
 
-// ================= MAIN =================
 int main()
 {
     glfwInit();
@@ -347,7 +336,7 @@ int main()
         glBindTexture(GL_TEXTURE_2D,texture);
 
         // Floor
-        float rotationSpeed = 0.2f; // slower
+        float rotationSpeed = 0.12f; 
         glm::mat4 model(1.0f);
         model = glm::translate(model, glm::vec3(0,2,0));
         model = glm::rotate(model, t * rotationSpeed, glm::vec3(0,1,0));
@@ -358,7 +347,7 @@ int main()
 
         // Sphere
         glm::mat4 sphere(3.0f);
-        sphere = glm::translate(sphere, glm::vec3(0,2,0));
+        sphere = glm::translate(sphere, glm::vec3(0,2.2f,0));
         sphere = glm::rotate(sphere, t, glm::vec3(0,1,0));
         sphere = glm::scale(sphere, glm::vec3(1.5f));
 

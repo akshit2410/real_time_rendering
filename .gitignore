@@ -2,3 +2,9 @@
 .vscode/
 *.DS_Store
 *.mov
+*.pdf
+*.pptx
+*.ppt
+*.mp4
+*.png
+imgui

@@ -14,6 +14,12 @@
 #include <string>
 #include <fstream>
 #include <sstream>
+#include <chrono>
+#include <cmath>
+#include <filesystem>
+#include <iomanip>
+#include <limits>
+#include <algorithm>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -46,9 +52,98 @@ float zoomLevel = 1.0f;
 glm::vec2 zoomOffset = glm::vec2(0.0f, 0.0f);
 bool splitScreen = false;
 
-// ----------------------------------------------------------------------------------
+struct FrameStats {
+    double avgCpuMs = 0.0;
+    double minCpuMs = std::numeric_limits<double>::max();
+    double maxCpuMs = 0.0;
+    double avgGpuMs = 0.0;
+    double avgFps = 0.0;
+};
+
+static float toneMapChannel(float value) {
+    value = value / (value + 1.0f);
+    value *= 2.0f;
+    return std::pow(std::max(value, 0.0f), 1.0f / 2.2f);
+}
+
+// Read back the accumulated HDR texture and convert it to the same tone-mapped
+// luminance space used for the convergence/MSE benchmark.
+static std::vector<float> readAccumulatedLuminance(unsigned int texture, int width, int height, int sampleCount) {
+    std::vector<float> rgba((size_t)width * (size_t)height * 4);
+    std::vector<float> luminance((size_t)width * (size_t)height);
+
+    glBindTexture(GL_TEXTURE_2D, texture);
+    glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, rgba.data());
+
+    const float invSamples = 1.0f / std::max(sampleCount, 1);
+    for (size_t i = 0, p = 0; i < luminance.size(); ++i, p += 4) {
+        float r = toneMapChannel(rgba[p] * invSamples);
+        float g = toneMapChannel(rgba[p + 1] * invSamples);
+        float b = toneMapChannel(rgba[p + 2] * invSamples);
+        luminance[i] = 0.2126f * r + 0.7152f * g + 0.0722f * b;
+    }
+
+    return luminance;
+}
+
+static double meanSquaredError(const std::vector<float>& image, const std::vector<float>& reference) {
+    if (image.size() != reference.size() || image.empty()) {
+        return 0.0;
+    }
+
+    double sum = 0.0;
+    for (size_t i = 0; i < image.size(); ++i) {
+        const double diff = (double)image[i] - (double)reference[i];
+        sum += diff * diff;
+    }
+    return sum / (double)image.size();
+}
+
+// Lightweight screenshot export used by benchmark runs. PPM keeps the project
+// dependency-free and can be opened or converted by most image tools.
+static bool saveAccumulatedPPM(const std::string& path, unsigned int texture, int width, int height, int sampleCount) {
+    std::vector<float> rgba((size_t)width * (size_t)height * 4);
+    glBindTexture(GL_TEXTURE_2D, texture);
+    glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, rgba.data());
+
+    std::ofstream out(path, std::ios::binary);
+    if (!out) {
+        return false;
+    }
+
+    out << "P6\n" << width << " " << height << "\n255\n";
+    const float invSamples = 1.0f / std::max(sampleCount, 1);
+    for (int y = height - 1; y >= 0; --y) {
+        for (int x = 0; x < width; ++x) {
+            const size_t p = ((size_t)y * (size_t)width + (size_t)x) * 4;
+            unsigned char rgb[3] = {
+                (unsigned char)std::clamp(toneMapChannel(rgba[p] * invSamples) * 255.0f, 0.0f, 255.0f),
+                (unsigned char)std::clamp(toneMapChannel(rgba[p + 1] * invSamples) * 255.0f, 0.0f, 255.0f),
+                (unsigned char)std::clamp(toneMapChannel(rgba[p + 2] * invSamples) * 255.0f, 0.0f, 255.0f)
+            };
+            out.write((char*)rgb, 3);
+        }
+    }
+
+    return true;
+}
+
+static void printResourceUse(int width, int height) {
+    const double mib = 1024.0 * 1024.0;
+    const double accumTextureMiB = (double)width * (double)height * 4.0 * sizeof(float) / mib;
+    const double depthMiB = (double)width * (double)height * 3.0 / mib;
+    const double totalMiB = accumTextureMiB + depthMiB;
+
+    std::cout << "\n[Resource Usage]" << std::endl;
+    std::cout << "Resolution: " << width << " x " << height << std::endl;
+    std::cout << "Accumulation texture RGBA32F: " << accumTextureMiB << " MiB" << std::endl;
+    std::cout << "Depth renderbuffer DEPTH24: " << depthMiB << " MiB" << std::endl;
+    std::cout << "Approximate framebuffer GPU memory: " << totalMiB << " MiB" << std::endl;
+}
+
+
 // Shader Class
-// ----------------------------------------------------------------------------------
+
 class Shader {
 public:
     unsigned int ID;
@@ -118,9 +213,7 @@ private:
     }
 };
 
-// ----------------------------------------------------------------------------------
 // Quad Buffer for Blitting
-// ----------------------------------------------------------------------------------
 unsigned int quadVAO = 0;
 unsigned int quadVBO;
 void renderQuad() {
@@ -147,9 +240,7 @@ void renderQuad() {
     glBindVertexArray(0);
 }
 
-// ----------------------------------------------------------------------------------
 // Sphere Geometry
-// ----------------------------------------------------------------------------------
 unsigned int sphereVAO = 0;
 unsigned int indexCount;
 void renderSphere() {
@@ -247,7 +338,7 @@ int main() {
     // Shaders
     Shader pbrShader("../shaders/pbr.vs.glsl", "../shaders/pbr.fs.glsl");
     
-    // Simple screen-space shader for blitting accumulation texture
+
     const char* screenVS = R"(#version 330 core
     layout (location = 0) in vec3 aPos;
     layout (location = 1) in vec2 aTexCoords;
@@ -302,6 +393,203 @@ int main() {
     if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
         std::cout << "ERROR::FRAMEBUFFER:: Framebuffer is not complete!" << std::endl;
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+    auto drawScene = [&](int activeFrameCount, bool activeMonteCarlo, int activeSamplingMode, bool activeSplitScreen, float activeRoughness) {
+        pbrShader.use();
+        glm::mat4 projection = glm::perspective(glm::radians(fov), (float)width / (float)height, 0.1f, 100.0f);
+        glm::mat4 view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
+        pbrShader.setMat4("projection", projection);
+        pbrShader.setMat4("view", view);
+        pbrShader.setVec3("camPos", cameraPos);
+        pbrShader.setVec3("lightPos", lightPos);
+        pbrShader.setVec3("lightColor", lightColor * lightIntensity);
+        pbrShader.setFloat("roughness", activeRoughness);
+        pbrShader.setInt("frameCount", activeFrameCount);
+        pbrShader.setInt("samplingMode", activeSamplingMode);
+        pbrShader.setBool("useMonteCarlo", activeMonteCarlo);
+        pbrShader.setBool("splitScreen", activeSplitScreen);
+        pbrShader.setFloat("screenWidth", (float)width);
+
+        glm::mat4 model = glm::mat4(1.0f);
+        model = glm::translate(model, glm::vec3(-3.5f, 0.0f, 0.0f));
+        pbrShader.setMat4("model", model);
+        pbrShader.setVec3("albedo", glm::vec3(1.0f, 0.3f, 0.1f));
+        pbrShader.setFloat("metallic", 0.0f);
+        pbrShader.setInt("brdfMode", 0);
+        renderSphere();
+
+        model = glm::mat4(1.0f);
+        pbrShader.setMat4("model", model);
+        pbrShader.setVec3("albedo", glm::vec3(0.5f, 0.5f, 0.5f));
+        pbrShader.setFloat("metallic", 0.0f);
+        pbrShader.setInt("brdfMode", 1);
+        renderSphere();
+
+        model = glm::mat4(1.0f);
+        model = glm::translate(model, glm::vec3(3.5f, 0.0f, 0.0f));
+        pbrShader.setMat4("model", model);
+        pbrShader.setVec3("albedo", glm::vec3(1.0f, 0.71f, 0.29f));
+        pbrShader.setFloat("metallic", 1.0f);
+        pbrShader.setInt("brdfMode", 1);
+        renderSphere();
+    };
+
+    auto clearAccumulation = [&]() {
+        glBindFramebuffer(GL_FRAMEBUFFER, accumFBO);
+        glViewport(0, 0, width, height);
+        glDisable(GL_BLEND);
+        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    };
+
+    auto renderAccumulatedFrame = [&](int& activeFrameCount, int activeSamplesPerFrame, int activeSamplingMode, float activeRoughness) {
+        glBindFramebuffer(GL_FRAMEBUFFER, accumFBO);
+        glViewport(0, 0, width, height);
+        glClear(GL_DEPTH_BUFFER_BIT);
+        glEnable(GL_DEPTH_TEST);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_ONE, GL_ONE);
+
+        for (int s = 0; s < activeSamplesPerFrame; ++s) {
+            activeFrameCount++;
+            drawScene(activeFrameCount, true, activeSamplingMode, false, activeRoughness);
+        }
+
+        glDisable(GL_BLEND);
+    };
+
+    auto renderAnalyticalFrame = [&]() {
+        glBindFramebuffer(GL_FRAMEBUFFER, accumFBO);
+        glViewport(0, 0, width, height);
+        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        glEnable(GL_DEPTH_TEST);
+        glDisable(GL_BLEND);
+        drawScene(1, false, samplingMode, splitScreen, roughness);
+    };
+
+    auto runBenchmark = [&]() {
+        namespace fs = std::filesystem;
+        const fs::path outputDir = fs::path("../report/benchmark_output");
+        fs::create_directories(outputDir);
+
+        printResourceUse(width, height);
+
+        std::ofstream performanceCsv(outputDir / "performance.csv");
+        performanceCsv << "SamplesPerFrame,Frames,ResolutionWidth,ResolutionHeight,AvgFPS,AvgCPUFrameMs,MinCPUFrameMs,MaxCPUFrameMs,AvgGPUFrameMs\n";
+
+        std::cout << "\n[Performance Benchmark]" << std::endl;
+        std::cout << "Monte Carlo ON, " << width << " x " << height << ", 200 displayed frames per sample count" << std::endl;
+
+        const bool gpuTimerAvailable = GLAD_GL_VERSION_3_3 || glfwExtensionSupported("GL_ARB_timer_query");
+        if (!gpuTimerAvailable) {
+            std::cout << "OpenGL timer queries are unavailable; AvgGPUFrameMs will be reported as 0.0 and CPU timing remains valid." << std::endl;
+        }
+
+        // Performance sweep: fixed 200 displayed frames at increasing samples/frame.
+        const std::vector<int> sampleRates = {1, 2, 4, 8, 16};
+        for (int sampleRate : sampleRates) {
+            clearAccumulation();
+            int benchmarkFrameCount = 0;
+            FrameStats stats;
+            double cpuTotal = 0.0;
+            double gpuTotal = 0.0;
+
+            GLuint query = 0;
+            if (gpuTimerAvailable) {
+                glGenQueries(1, &query);
+            }
+
+            for (int frame = 0; frame < 200; ++frame) {
+                const auto cpuStart = std::chrono::high_resolution_clock::now();
+                if (gpuTimerAvailable) {
+                    glBeginQuery(GL_TIME_ELAPSED, query);
+                }
+                renderAccumulatedFrame(benchmarkFrameCount, sampleRate, 1, roughness);
+                if (gpuTimerAvailable) {
+                    glEndQuery(GL_TIME_ELAPSED);
+                }
+                glFinish();
+                const auto cpuEnd = std::chrono::high_resolution_clock::now();
+
+                GLuint64 gpuNs = 0;
+                if (gpuTimerAvailable) {
+                    glGetQueryObjectui64v(query, GL_QUERY_RESULT, &gpuNs);
+                }
+                const double cpuMs = std::chrono::duration<double, std::milli>(cpuEnd - cpuStart).count();
+                const double gpuMs = (double)gpuNs / 1000000.0;
+                cpuTotal += cpuMs;
+                gpuTotal += gpuMs;
+                stats.minCpuMs = std::min(stats.minCpuMs, cpuMs);
+                stats.maxCpuMs = std::max(stats.maxCpuMs, cpuMs);
+            }
+
+            if (gpuTimerAvailable) {
+                glDeleteQueries(1, &query);
+            }
+
+            stats.avgCpuMs = cpuTotal / 200.0;
+            stats.avgGpuMs = gpuTotal / 200.0;
+            stats.avgFps = 1000.0 / std::max(stats.avgCpuMs, 0.0001);
+
+            performanceCsv << sampleRate << ",200," << width << "," << height << ","
+                           << stats.avgFps << "," << stats.avgCpuMs << ","
+                           << stats.minCpuMs << "," << stats.maxCpuMs << "," << stats.avgGpuMs << "\n";
+
+            std::cout << "Samples: " << sampleRate
+                      << " | Avg FPS: " << std::fixed << std::setprecision(2) << stats.avgFps
+                      << " | Avg Frame Time: " << stats.avgCpuMs << " ms"
+                      << " | Avg GPU Time: " << stats.avgGpuMs << " ms" << std::endl;
+
+            saveAccumulatedPPM((outputDir / ("mc_ggx_spf_" + std::to_string(sampleRate) + ".ppm")).string(),
+                               accumTexture, width, height, benchmarkFrameCount);
+        }
+
+        std::ofstream convergenceCsv(outputDir / "convergence.csv");
+        convergenceCsv << "SamplingMode,RoughnessLabel,Roughness,SampleCount,MSETo512SampleReference\n";
+
+        std::cout << "\n[Variance / Convergence Benchmark]" << std::endl;
+        const std::vector<int> checkpoints = {32, 64, 128, 256, 512};
+        const struct { int mode; const char* name; } modes[] = {{0, "Uniform/Cosine"}, {1, "GGX"}};
+        const struct { float value; const char* label; } roughnessCases[] = {{0.05f, "Low"}, {0.5f, "High"}};
+
+        // Convergence sweep: compare each checkpoint against the 512-sample
+        // image from the same sampler/roughness as a stable internal reference.
+        for (const auto& roughnessCase : roughnessCases) {
+            for (const auto& mode : modes) {
+                clearAccumulation();
+                int convergenceFrameCount = 0;
+                std::vector<std::vector<float>> checkpointImages;
+                checkpointImages.reserve(checkpoints.size());
+
+                for (int target : checkpoints) {
+                    while (convergenceFrameCount < target) {
+                        renderAccumulatedFrame(convergenceFrameCount, 1, mode.mode, roughnessCase.value);
+                    }
+                    checkpointImages.push_back(readAccumulatedLuminance(accumTexture, width, height, convergenceFrameCount));
+                }
+
+                const std::vector<float>& reference = checkpointImages.back();
+                for (size_t i = 0; i < checkpoints.size(); ++i) {
+                    const double mse = meanSquaredError(checkpointImages[i], reference);
+                    convergenceCsv << mode.name << "," << roughnessCase.label << ","
+                                   << roughnessCase.value << "," << checkpoints[i] << "," << mse << "\n";
+                    std::cout << mode.name << " Sampling Variance/MSE (" << roughnessCase.label
+                              << " roughness, " << checkpoints[i] << " samples): "
+                              << std::setprecision(8) << mse << std::endl;
+                }
+
+                const std::string fileModeName = (mode.mode == 0) ? "uniform_cosine" : "ggx";
+                saveAccumulatedPPM((outputDir / (std::string("convergence_") + fileModeName + "_" + roughnessCase.label + "_512.ppm")).string(),
+                                   accumTexture, width, height, convergenceFrameCount);
+            }
+        }
+
+        std::cout << "\nBenchmark CSV/screenshots written to: " << fs::absolute(outputDir) << std::endl;
+        clearAccumulation();
+    };
+
+    runBenchmark();
 
     // ImGui Setup
     IMGUI_CHECKVERSION();
@@ -394,118 +682,28 @@ int main() {
         }
 
         if (useMonteCarlo) {
+            if (frameCount == 0) {
+                clearAccumulation();
+            }
+
             glBindFramebuffer(GL_FRAMEBUFFER, accumFBO);
             glViewport(0, 0, width, height);
-
-            if (frameCount == 0) {
-                glDisable(GL_BLEND);
-                glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-                glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-            } else {
-                glClear(GL_DEPTH_BUFFER_BIT);
-            }
+            glClear(GL_DEPTH_BUFFER_BIT);
+            glEnable(GL_DEPTH_TEST);
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_ONE, GL_ONE);
 
             for (int s = 0; s < samplesPerFrame; ++s) {
                 bool shouldSample = !limitSamples || (frameCount < maxSamples);
                 if (!shouldSample) break;
-                
+
                 frameCount++;
-                
-                glEnable(GL_DEPTH_TEST);
-                glEnable(GL_BLEND);
-                glBlendFunc(GL_ONE, GL_ONE);
-
-                pbrShader.use();
-                glm::mat4 projection = glm::perspective(glm::radians(fov), (float)width / (float)height, 0.1f, 100.0f);
-                glm::mat4 view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
-                pbrShader.setMat4("projection", projection);
-                pbrShader.setMat4("view", view);
-                pbrShader.setVec3("camPos", cameraPos);
-                pbrShader.setVec3("lightPos", lightPos);
-                pbrShader.setVec3("lightColor", lightColor * lightIntensity);
-                pbrShader.setFloat("roughness", roughness);
-                pbrShader.setInt("frameCount", frameCount);
-                pbrShader.setInt("samplingMode", samplingMode);
-                pbrShader.setBool("useMonteCarlo", useMonteCarlo);
-                pbrShader.setBool("splitScreen", splitScreen);
-                pbrShader.setFloat("screenWidth", (float)width);
-
-                // Render 3 Spheres
-                glm::mat4 model = glm::mat4(1.0f);
-                model = glm::translate(model, glm::vec3(-3.5f, 0.0f, 0.0f));
-                pbrShader.setMat4("model", model);
-                pbrShader.setVec3("albedo", glm::vec3(1.0f, 0.3f, 0.1f));
-                pbrShader.setFloat("metallic", 0.0f);
-                pbrShader.setInt("brdfMode", 0);
-                renderSphere();
-
-                model = glm::mat4(1.0f);
-                pbrShader.setMat4("model", model);
-                pbrShader.setVec3("albedo", glm::vec3(0.5f, 0.5f, 0.5f));
-                pbrShader.setFloat("metallic", 0.0f);
-                pbrShader.setInt("brdfMode", 1);
-                renderSphere();
-
-                model = glm::mat4(1.0f);
-                model = glm::translate(model, glm::vec3(3.5f, 0.0f, 0.0f));
-                pbrShader.setMat4("model", model);
-                pbrShader.setVec3("albedo", glm::vec3(1.0f, 0.71f, 0.29f));
-                pbrShader.setFloat("metallic", 1.0f);
-                pbrShader.setInt("brdfMode", 1);
-                renderSphere();
-                
-                // Note: Clear depth *within* the loop if we had overlapping objects, 
-                // but since it's just 3 spheres, once per frame is enough.
+                drawScene(frameCount, true, samplingMode, splitScreen, roughness);
             }
             glDisable(GL_BLEND);
         } else {
             frameCount = 1;
-            glBindFramebuffer(GL_FRAMEBUFFER, accumFBO); 
-            glViewport(0, 0, width, height);
-            glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-            
-            glEnable(GL_DEPTH_TEST);
-            glDisable(GL_BLEND);
-
-            pbrShader.use();
-            glm::mat4 projection = glm::perspective(glm::radians(fov), (float)width / (float)height, 0.1f, 100.0f);
-            glm::mat4 view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
-            pbrShader.setMat4("projection", projection);
-            pbrShader.setMat4("view", view);
-            pbrShader.setVec3("camPos", cameraPos);
-            pbrShader.setVec3("lightPos", lightPos);
-            pbrShader.setVec3("lightColor", lightColor * lightIntensity);
-            pbrShader.setFloat("roughness", roughness);
-            pbrShader.setInt("frameCount", frameCount);
-            pbrShader.setInt("samplingMode", samplingMode);
-            pbrShader.setBool("useMonteCarlo", useMonteCarlo);
-            pbrShader.setBool("splitScreen", splitScreen);
-            pbrShader.setFloat("screenWidth", (float)width);
-
-            // Render 3 Spheres (Analytical)
-            glm::mat4 model = glm::mat4(1.0f);
-            model = glm::translate(model, glm::vec3(-3.5f, 0.0f, 0.0f));
-            pbrShader.setMat4("model", model);
-            pbrShader.setVec3("albedo", glm::vec3(1.0f, 0.3f, 0.1f));
-            pbrShader.setFloat("metallic", 0.0f);
-            pbrShader.setInt("brdfMode", 0);
-            renderSphere();
-
-            model = glm::mat4(1.0f);
-            pbrShader.setMat4("model", model);
-            pbrShader.setVec3("albedo", glm::vec3(0.5f, 0.5f, 0.5f));
-            pbrShader.setFloat("metallic", 0.0f);
-            pbrShader.setInt("brdfMode", 1);
-            renderSphere();
-
-            model = glm::mat4(1.0f);
-            model = glm::translate(model, glm::vec3(3.5f, 0.0f, 0.0f));
-            pbrShader.setMat4("model", model);
-            pbrShader.setVec3("albedo", glm::vec3(1.0f, 0.71f, 0.29f));
-            pbrShader.setFloat("metallic", 1.0f);
-            pbrShader.setInt("brdfMode", 1);
-            renderSphere();
+            renderAnalyticalFrame();
         }
 
         // --- Post-Processing / Blit Pass ---

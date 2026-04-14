@@ -1,0 +1,343 @@
+\documentclass[12pt]{article}
+
+\usepackage[a4paper, margin=1in]{geometry}
+\usepackage{times}
+\usepackage{setspace}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{cite}
+\usepackage[
+    colorlinks=true,
+    linkcolor=blue,
+    citecolor=blue,
+    urlcolor=blue
+]{hyperref}
+\usepackage{xcolor}
+\usepackage{tocloft}
+
+\renewcommand{\cftsecfont}{\color{blue}}
+\renewcommand{\cftsubsecfont}{\color{blue}}
+
+\renewcommand{\cftsecpagefont}{\color{blue}}
+\renewcommand{\cftsubsecpagefont}{\color{blue}}
+\setstretch{1.15}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.45em}
+
+\title{\textbf{Comparative Study of Microfacet BRDF Models for Real-Time Rendering}}
+\date{Assignment - 5}
+\author{Akshit Shrivastava - 24373009 - MSc Computer Science - AR/VR}
+
+\begin{document}
+
+
+\maketitle
+\tableofcontents
+\newpage
+\begin{abstract}
+\noindent This project investigates a practical question in real-time rendering: once a physically based BRDF has been chosen, how much does the sampling strategy matter? This project includes an implementation of an OpenGL 3.3 renderer that compares a normalized Blinn-Phong material with a Cook-Torrance microfacet BRDF using GGX, Smith masking-shadowing, and Schlick Fresnel. The renderer supports both deterministic direct lighting and stochastic Monte Carlo rendering with progressive accumulation into an RGBA32F framebuffer.\\
+
+\noindent The project is motivated by Wu et al.'s \emph{Neural BRDF Importance Sampling by Reparameterization}~\cite{wu2025neural}. Their paper addresses the harder case of sampling neural BRDFs, where an analytic inverse sampler may not exist. The implementation builds the analytical baseline around the same core issue: a sampler that does not match the shape of the BRDF wastes samples and converges slowly. In the results, the GGX half-vector sampler gives visibly cleaner glossy highlights than the uniform/cosine hemisphere sampler, especially for low roughness metallic surfaces. The work therefore demonstrates both the value of BRDF-aware sampling and the point at which a more advanced learned sampler would become useful.
+\end{abstract}
+
+\section{Introduction}
+
+Physically based rendering is often introduced through the rendering equation:
+\begin{equation}
+L_o(\omega_o) =
+\int_{\Omega}
+f_r(\omega_i,\omega_o)\,L_i(\omega_i)\,
+(\mathbf{n}\cdot\omega_i)\,d\omega_i .
+\end{equation}
+The equation is compact, but in practice it hides the main difficulty: most interesting lighting and material combinations cannot be integrated exactly in real time. Monte Carlo integration gives a flexible approximation, but the image quality depends strongly on where the samples are placed. If the sampler spends most of its work in directions that contribute little energy, the result is noisy even when the BRDF itself is physically plausible.
+
+The objective of this project was to build a small renderer where that trade-off is visible rather than only theoretical. The demo contains three sphere materials, interactive roughness and light controls, a deterministic reference mode, and a progressive Monte Carlo mode. The main comparison is between uniform/cosine hemisphere sampling and GGX importance sampling. The report uses ``uniform/cosine'' because the UI label says ``Uniform'', while the shader implementation actually uses cosine-weighted hemisphere sampling.
+
+\section{Background}
+
+\subsection{Reference Paper}
+
+The attached paper, \emph{Neural BRDF Importance Sampling by Reparameterization} by Wu et al.~\cite{wu2025neural}, focuses on the problem of sampling neural BRDFs. Neural BRDFs are attractive because they can represent complex measured materials, but they are awkward to sample directly. Unlike a simple analytic BRDF, a neural representation may not provide a closed-form inverse CDF or a simple distribution that can be sampled efficiently.
+
+Wu et al. treat the problem as one of reparameterization. Instead of forcing the network itself to be an invertible density model, they learn a transformation from simple input samples to BRDF-relevant output directions. The important idea for this project is not the neural architecture itself, but the rendering principle behind it: good samples should land where the BRDF and lighting actually contribute energy. This implementation demonstrates that principle with analytical BRDFs before moving to the harder neural case.
+
+\subsection{BRDF and Sampling Theory}
+
+The implementation compares two shading models. The first is a normalized Blinn-Phong model, included as a familiar empirical baseline. It is fast and produces plausible highlights, but it is not a full physical surface model because it does not explicitly represent microgeometry or a complete Fresnel response.
+
+The second is the Cook-Torrance microfacet BRDF~\cite{cook1982reflectance}:
+\begin{equation}
+f_r =
+\frac{D(\mathbf{h})G(\omega_i,\omega_o)F(\omega_i,\mathbf{h})}
+{4(\mathbf{n}\cdot\omega_i)(\mathbf{n}\cdot\omega_o)} .
+\end{equation}
+The shader uses the GGX/Trowbridge-Reitz normal distribution, Smith geometry with Schlick-GGX, and Schlick Fresnel~\cite{walter2007microfacet,schlick1994inexpensive}. This is a standard real-time PBR choice because it gives long-tailed highlights and believable metallic response without requiring an expensive material model.
+
+Monte Carlo integration estimates the rendering equation as
+\begin{equation}
+L_o \approx
+\frac{1}{N}
+\sum_{k=1}^{N}
+\frac{
+f_r(\omega_k,\omega_o)L_i(\omega_k)(\mathbf{n}\cdot\omega_k)
+}{p(\omega_k)} ,
+\end{equation}
+where $p(\omega_k)$ is the PDF of the sampled direction. The cosine sampler uses
+\begin{equation}
+p(\omega) = \frac{\mathbf{n}\cdot\omega}{\pi},
+\end{equation}
+which is sensible for diffuse surfaces. For glossy Cook-Torrance materials, the project also implements GGX half-vector sampling:
+\begin{equation}
+\omega_i = \mathrm{reflect}(-\omega_o,\mathbf{h}), \qquad
+p(\omega_i) =
+\frac{D(\mathbf{h})(\mathbf{n}\cdot\mathbf{h})}
+{4(\omega_o\cdot\mathbf{h})}.
+\end{equation}
+This places more samples near the specular lobe and is therefore much better matched to low-roughness metallic materials.
+
+\section{Implementation}
+
+The project is written in C++ using OpenGL 3.3, GLFW, GLAD, GLM, GLSL, and Dear ImGui. The renderer uses a forward pipeline, and the BRDF evaluation and sampling logic are both executed in the fragment shader. The scene is deliberately controlled: three procedurally generated UV spheres share a $64 \times 64$ segment indexed mesh. The left sphere uses the Blinn-Phong baseline, the middle sphere is a neutral Cook-Torrance dielectric, and the right sphere is a metallic Cook-Torrance material.
+
+There are two rendering modes. In analytical mode, each fragment evaluates direct lighting from a single light direction. This gives a clean reference image and helps verify that the BRDFs, roughness, and material parameters behave as expected. In Monte Carlo mode, each frame contributes new random samples to a persistent RGBA32F accumulation framebuffer. The final screen pass divides the accumulated radiance by the number of samples, applies Reinhard tone mapping, boosts exposure, and performs gamma correction.
+
+The random samples are generated in GLSL using a hash based on fragment coordinates and frame count. This keeps the experiment GPU-side and avoids CPU sampling overhead. For uniform/cosine sampling, the shader builds a local tangent frame and samples the hemisphere around the normal. For GGX sampling, it samples a GGX half-vector and reflects the view direction around it. A split-screen mode and sphere-specific zoom controls were added because small differences in variance are much easier to judge when the same material can be inspected at the same scale.
+
+The ImGui interface exposes the parameters used in the evaluation: Monte Carlo toggle, sampling mode, roughness, light position, light intensity, sample limit, samples per frame, accumulation reset, camera FOV, and digital zoom/pan. Increasing samples per frame gives faster convergence, but it also redraws the spheres more times per displayed frame, so the cost scales directly with the sample count.
+
+All result images in this report are original screenshots generated from this project implementation. The external libraries and reference papers used to support the implementation are cited in the bibliography.
+
+\section{Results and Evaluation}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.75\linewidth]{figures/analytical_high_roughness.png}
+\caption{Analytical direct-lighting baseline. This mode is noise-free and is mainly used to verify the material setup before switching to Monte Carlo sampling.}
+\label{fig:baseline}
+\end{figure}
+Figure~\ref{fig:baseline} shows the deterministic direct-lighting mode. There is no sampling noise here, so the image is useful as a sanity check rather than a final result. The three materials separate clearly: diffuse/empirical on the left, neutral Cook-Torrance in the middle, and metallic Cook-Torrance on the right.\\
+
+The first important result is the low-roughness comparison in Figure~\ref{fig:sampling}. With a sharp lobe, uniform/cosine sampling produces visible speckle because many samples miss the directions that matter for the specular response. GGX importance sampling produces a more stable highlight because it is shaped around the same microfacet distribution used in the BRDF.
+
+\begin{figure}[h]
+\centering
+\begin{minipage}{0.49\linewidth}
+\centering
+\includegraphics[width=\linewidth]{figures/mc_cosine_low_roughness.png}
+\end{minipage}
+\hfill
+\begin{minipage}{0.49\linewidth}
+\centering
+\includegraphics[width=\linewidth]{figures/mc_ggx_low_roughness.png}
+\end{minipage}
+\caption{Low-roughness Monte Carlo comparison. Left: uniform/cosine sampling leaves strong variance on glossy regions. Right: GGX importance sampling targets the microfacet lobe more directly and gives a cleaner metallic highlight.}
+\label{fig:sampling}
+\end{figure}
+
+Figure~\ref{fig:uniformzoom} shows the uniform/cosine sampler in close-up. The high-roughness case spreads energy across a wide region, while the low-roughness case produces a compact bright highlight. In both cases the noise pattern makes the same point: a diffuse-oriented sampler is not a good fit for a concentrated specular lobe.
+
+\begin{figure}[h]
+\centering
+\begin{minipage}{0.49\linewidth}
+\centering
+\includegraphics[width=\linewidth]{figures/uniform_zoom_high_roughness.png}
+\end{minipage}
+\hfill
+\begin{minipage}{0.49\linewidth}
+\centering
+\includegraphics[width=\linewidth]{figures/uniform_zoom_low_roughness.png}
+\end{minipage}
+\caption{Uniform/cosine sampling close-ups. The sampler works reasonably for broad diffuse-style energy, but it struggles when the material response becomes sharp.}
+\label{fig:uniformzoom}
+\end{figure}
+
+Figure~\ref{fig:ggxzoom} shows the same style of close-up for GGX importance sampling. The highlight still needs accumulation, especially around the brightest part of the small light response, but the sampled directions are more useful. This is the strongest visual evidence that the BRDF and PDF should be designed together.
+
+\begin{figure}[h]
+\centering
+\begin{minipage}{0.49\linewidth}
+\centering
+\includegraphics[width=\linewidth]{figures/ggx_zoom_high_roughness_204.png}
+\end{minipage}
+\hfill
+\begin{minipage}{0.49\linewidth}
+\centering
+\includegraphics[width=\linewidth]{figures/ggx_zoom_low_roughness_486.png}
+\end{minipage}
+\caption{GGX importance-sampling close-ups. The rough case becomes soft and forgiving, while the low-roughness case keeps a sharper highlight with less wasted sampling.}
+\label{fig:ggxzoom}
+\end{figure}
+
+The three additional screenshots in Figure~~\ref{fig:newshots} show the observed behaviour while tuning the zoomed left-sphere experiment. The GGX image keeps the energy concentrated around the highlight, while the uniform/cosine images spread noise more broadly across the visible surface. The last image also shows how sensitive the result is to roughness and light placement: even small UI changes noticeably alter the sampling difficulty.
+
+\begin{figure}[h]
+\centering
+\begin{minipage}{0.32\linewidth}
+\centering
+\includegraphics[width=\linewidth]{figures/new_ggx_zoom_lowrough_324.png}
+\end{minipage}
+\hfill
+\begin{minipage}{0.32\linewidth}
+\centering
+\includegraphics[width=\linewidth]{figures/new_uniform_zoom_lowrough_211.png}
+\end{minipage}
+\hfill
+\begin{minipage}{0.32\linewidth}
+\centering
+\includegraphics[width=\linewidth]{figures/new_uniform_zoom_lowrough_detail.png}
+\end{minipage}
+\caption{Additional zoomed Monte Carlo captures from the final test run. Left: GGX sampling at 324 accumulated samples. Middle and right: uniform/cosine sampling under low-roughness zoomed conditions, showing broader residual grain and sensitivity to material/light settings.}
+\label{fig:newshots}
+\end{figure}
+
+Roughness is the other major factor. Figure~\ref{fig:roughness} shows a higher-roughness Monte Carlo render. When roughness increases, the reflected energy is distributed over a larger angular range, and the integrand becomes less sharply peaked. This makes convergence more forgiving for both samplers, though GGX remains better aligned with the Cook-Torrance model.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.86\linewidth]{figures/mc_high_roughness.png}
+\caption{Higher-roughness Monte Carlo rendering. A broader lobe reduces the severity of variance compared with a sharp glossy highlight.}
+\label{fig:roughness}
+\end{figure}
+
+\subsection{Performance and Resource Use}
+
+An automatic benchmark pass was added to the renderer after the OpenGL context and accumulation framebuffer are created. It does not add any new ImGui controls or alter the live demo window; it simply runs at startup, prints the results to the console, and writes CSV files and PPM screenshots to \texttt{report/benchmark\_output}. Each performance run uses Monte Carlo rendering for 200 displayed frames at the current framebuffer resolution.
+
+On the tested Retina framebuffer the actual render target was $2560 \times 1440$, not the nominal $1280 \times 720$ window size. The cost is dominated by fragment shading and framebuffer bandwidth rather than geometry complexity, because the scene contains only three sphere draws. The RGBA32F accumulation texture uses approximately
+\[
+2560 \times 1440 \times 4 \times 4 \approx 56.25\ \mathrm{MiB}
+\]
+plus a 24-bit depth renderbuffer of roughly 10.55 MiB. The approximate framebuffer memory footprint is therefore 66.80 MiB, excluding small shader, vertex buffer, and ImGui resources. This is still modest on a modern GPU, but the compute cost increases with the samples-per-frame setting because every additional sample redraws the scene.
+
+\begin{center}
+\small
+\begin{tabular}{|c|c|c|c|c|}
+\hline
+\textbf{Samples/frame} & \textbf{Avg FPS} & \textbf{Avg CPU frame ms} & \textbf{Min/Max CPU ms} & \textbf{Avg GPU ms} \\
+\hline
+1 & 1120.50 & 0.892 & 0.457 / 21.737 & 0.270 \\
+\hline
+2 & 1280.12 & 0.781 & 0.483 / 3.949 & 0.282 \\
+\hline
+4 & 1248.24 & 0.801 & 0.576 / 2.809 & 0.330 \\
+\hline
+8 & 956.18 & 1.046 & 0.729 / 4.680 & 0.484 \\
+\hline
+16 & 793.38 & 1.260 & 0.937 / 5.097 & 0.806 \\
+\hline
+\end{tabular}
+\end{center}
+
+The CPU timings include the benchmark synchronisation cost because each measured frame waits for completion before reading the timer query. The GPU timer is therefore the cleaner measure of pure rendering cost: it rises from 0.270 ms at 1 sample/frame to 0.806 ms at 16 samples/frame. The scaling is not perfectly linear because the scene is very small and fixed OpenGL overhead, cache behaviour, driver scheduling, and timer-query synchronisation are still visible at sub-millisecond frame times.
+
+\subsection{Variance and Convergence Measurements}
+
+For convergence, the benchmark stores tone-mapped luminance buffers at 32, 64, 128, 256, and 512 accumulated samples, then reports mean squared error against the 512-sample image from the same sampling mode and roughness. This is not a ground-truth path-traced reference, but it is a useful internal convergence proxy because every method is judged against its own high-sample result under the same resolution, material, light, and camera settings. The CSV data is exported as \texttt{convergence.csv}.
+
+\begin{center}
+\small
+\begin{tabular}{|c|c|c|c|c|c|}
+\hline
+\textbf{Sampler} & \textbf{Roughness} & \textbf{32} & \textbf{64} & \textbf{128} & \textbf{256} \\
+\hline
+Uniform/cosine & 0.05 & 0.00142957 & 0.000933851 & 0.000487266 & 0.000180567 \\
+\hline
+GGX & 0.05 & 0.000156900 & 0.000131169 & 0.000101920 & 0.000058241 \\
+\hline
+Uniform/cosine & 0.50 & 0.00233698 & 0.00147497 & 0.000730473 & 0.000252202 \\
+\hline
+GGX & 0.50 & 0.00263321 & 0.00205790 & 0.00139441 & 0.000685470 \\
+\hline
+\end{tabular}
+\end{center}
+
+The low-roughness case is the strongest result. At 32 accumulated samples, GGX gives an MSE of 0.000156900, while uniform/cosine gives 0.00142957. That is about a 9.1$\times$ reduction in the measured error for the sharp glossy case, and the advantage remains visible at 64, 128, and 256 samples. This matches the theory: the GGX half-vector PDF places more samples near the microfacet lobe, while the cosine sampler wastes more samples in directions that contribute little to a narrow specular highlight.
+
+The high-roughness case is less one-sided. In this particular direct-light setup, the broad lobe and diffuse component make cosine-weighted directions competitive, and the 512-sample proxy metric gives lower MSE to uniform/cosine at the sampled checkpoints. This is treated as useful rather than disappointing: it shows that importance sampling is not a magic constant-speedup switch. It helps most when the sampling distribution matches the dominant energy in the integrand. For this project, that dominant case is the low-roughness metallic highlight, where GGX is clearly better.
+
+\begin{center}
+\begin{tabular}{|p{0.29\linewidth}|p{0.62\linewidth}|}
+\hline
+\textbf{Mode} & \textbf{Observed behaviour} \\
+\hline
+Analytical direct lighting & Clean and stable; useful as a BRDF reference, but it does not evaluate stochastic convergence. \\
+\hline
+Monte Carlo, 1 sample/frame & Interactive and easy to inspect, but visibly noisy until enough frames accumulate. \\
+\hline
+Monte Carlo, multiple samples/frame & Faster convergence at the cost of proportionally more fragment work per displayed frame. \\
+\hline
+Low roughness & Most difficult case because the specular lobe is narrow and bright. \\
+\hline
+High roughness & Easier to converge because the reflected energy is spread across more directions. \\
+\hline
+\end{tabular}
+\end{center}
+
+\section{Limitations and Future Work}
+
+The implementation is intentionally focused. It uses direct lighting only, so it does not include global illumination, environment maps, visibility against complex geometry, or multiple light transport bounces. The light is shaped to make variance easy to see, but it is not a complete sampled area light model. The renderer also switches between BRDF sampling modes rather than using multiple importance sampling, so it cannot yet balance light sampling and BRDF sampling in a statistically optimal way.
+
+The most natural next step would be to add multiple importance sampling and environment lighting. After that, the project could be pushed closer to the reference paper by replacing the analytical GGX sampler with a learned reparameterized sampler for measured or neural BRDFs. The analytical renderer built here would then act as a baseline for judging whether the learned sampler is actually reducing variance for the same sample budget.
+
+\section{Conclusion}
+
+The project shows that physically based shading and good sampling have to be considered together. The Cook-Torrance/GGX BRDF gives a more realistic material model than Blinn-Phong, but it only becomes practical for stochastic rendering when the samples are aimed at the important parts of the distribution. Uniform/cosine hemisphere sampling is acceptable for diffuse-style response, but it struggles on sharp glossy highlights. GGX importance sampling is a better match for the microfacet lobe and gives cleaner results for metallic, low-roughness surfaces.
+
+This also clarifies the relevance of Wu et al.'s neural BRDF paper. If a relatively simple analytic BRDF already benefits so clearly from a matched sampler, then complex learned BRDFs need the same idea even more. The final renderer is therefore both a working real-time demo and a compact experimental baseline for understanding why neural BRDF importance sampling is an important research direction.
+\begin{thebibliography}{9}
+
+\bibitem{wu2025neural}
+Liwen Wu, Sai Bi, Zexiang Xu, Hao Tan, Kai Zhang, Fujun Luan, Haolin Lu, and Ravi Ramamoorthi.
+\newblock Neural BRDF Importance Sampling by Reparameterization.
+\newblock \emph{arXiv:2505.08998}, 2025.
+\newblock \url{https://doi.org/10.48550/arXiv.2505.08998}.
+
+\bibitem{cook1982reflectance}
+Robert L. Cook and Kenneth E. Torrance.
+\newblock A Reflectance Model for Computer Graphics.
+\newblock \emph{ACM Transactions on Graphics}, 1(1):7--24, 1982.
+
+\bibitem{walter2007microfacet}
+Bruce Walter, Stephen R. Marschner, Hongsong Li, and Kenneth E. Torrance.
+\newblock Microfacet Models for Refraction through Rough Surfaces.
+\newblock In \emph{Proceedings of the Eurographics Symposium on Rendering}, 2007.
+
+\bibitem{schlick1994inexpensive}
+Christophe Schlick.
+\newblock An Inexpensive BRDF Model for Physically-based Rendering.
+\newblock \emph{Computer Graphics Forum}, 13(3):233--246, 1994.
+
+\bibitem{pharr2016pbr}
+Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+\newblock \emph{Physically Based Rendering: From Theory to Implementation}.
+\newblock Morgan Kaufmann, 3rd edition, 2016.
+
+\bibitem{opengl}
+Khronos Group.
+\newblock OpenGL 3.3 Core Profile Specification.
+\newblock \url{https://www.khronos.org/opengl/}.
+
+\bibitem{dearimgui}
+Omar Cornut.
+\newblock Dear ImGui: Bloat-free Graphical User Interface for C++.
+\newblock \url{https://github.com/ocornut/imgui}.
+
+\bibitem{glfw}
+GLFW Development Team.
+\newblock GLFW: An OpenGL Library.
+\newblock \url{https://www.glfw.org/}.
+
+\bibitem{glm}
+G-Truc Creation.
+\newblock OpenGL Mathematics (GLM).
+\newblock \url{https://github.com/g-truc/glm}.
+
+\bibitem{glad}
+Dav1dde.
+\newblock GLAD OpenGL Loader Generator.
+\newblock \url{https://github.com/Dav1dde/glad}.
+
+\end{thebibliography}
+
+\end{document}
